@@ -1,0 +1,133 @@
+やりたいこと：
+[OMS_Data/README.md at master · OpenMonkeyStudio/OMS_Data](https://github.com/OpenMonkeyStudio/OMS_Data/blob/master/README.md)
+の中の19万枚のサル座標データを用いた主成分分析を行う。
+
+まず：
+元のデータが3.8GBもあるのでほしいところだけ抽出する。Google Colabを使う。
+```
+# 1. ドライブをマウント
+from google.colab import drive
+drive.mount('/content/drive')
+
+# 2. 座標データ（Data.mat）のみをピンポイントで解凍
+# ※パスは自分の環境に合わせて書き換える
+!unzip "/content/drive/MyDrive/dataset/OMS_Dataset.zip" "OMS_Dataset/Data.mat"
+```
+
+.matファイルが得られたら、Pythonで分析かけていく。
+
+```
+import scipy.io　#scipyは.matを開ける　
+import pandas as pd　#pandasはデータを表にできる
+import numpy as np　#NumPyは巨大な行列を扱える
+
+#sklearnは機械学習や統計分析のアルゴリズムセット
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt　#可視化するため
+```
+
+# --- Phase 1: データロード ---
+```
+# フルパスを指定
+mat = scipy.io.loadmat(r'C:\Users\akane\Downloads\Data.mat')
+data = mat['T']['data'][0, 0] # 構造体からの抽出
+```
+本来matlabのデータはPythonとは言語が違うので、SciPyによってデータを辞書型（dict）に翻訳してもらう
+0, 0を指定することでmatlabの多重構造の一番奥を指定できる
+
+# --- Phase 2: 整形と標準化 ---
+
+```
+# 座標データのみ抽出 (5列目以降、26次元)
+coords = data[:, 4:]
+```
+
+元のデータには最初の4列に画像の大きさなどの余計な情報が含まれているため、それらを切り捨てる
+
+```
+# 標準化
+scaler = StandardScaler()
+df_scaled = scaler.fit_transform(coords)
+```
+
+標準化とは、すべての部位の動きを同じスケールに変換することですべての関節の動きを平等に評価できるようにすること。
+```
+
+import numpy as np
+import pandas as pd
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+
+# --- 新Phase 2: 幾何学的正規化（スケールノイズの排除） ---
+
+# 1. 基準点（HipとNeck）の座標を抽出
+# parts = ["Nose", "Head", "Neck", "RShoulder", "RHand", "LShoulder", "LHand", 
+#          "Hip", "RKnee", "RFoot", "LKnee", "LFoot", "Tail"]
+# Hip は8番目(インデックス7)、Neck は3番目(インデックス2)
+hip_y = coords[:, 14:15]
+hip_x = coords[:, 15:16]
+neck_y = coords[:, 4:5]
+neck_x = coords[:, 5:6]
+
+# 2. センタリング（位置のズレを消す）
+# 全てのy座標からHipのy座標を、全てのx座標からHipのx座標を引く
+# これにより、全てのサルの腰が座標 (0,0) に固定される
+coords_centered = np.zeros_like(coords)
+coords_centered[:, 0::2] = coords[:, 0::2] - hip_y
+coords_centered[:, 1::2] = coords[:, 1::2] - hip_x
+
+# 3. スケーリング（大きさのズレを消す）
+# 首から腰までの距離（Torso Length）をピタゴラスの定理で計算
+torso_length = np.sqrt((neck_y - hip_y)**2 + (neck_x - hip_x)**2)
+# ゼロ除算エラーを防ぐための安全装置
+torso_length[torso_length == 0] = 1.0 
+
+# 全ての座標をTorso Lengthで割る（背骨の長さが全個体で「1」に統一される）
+coords_normalized = coords_centered / torso_length
+
+# --- Phase 3: 標準化とPCA ---
+df_norm = pd.DataFrame(coords_normalized, columns=cols)
+
+# 正規化済みのデータをさらに標準化
+scaler = StandardScaler()
+df_scaled = scaler.fit_transform(df_norm)
+
+# PCAの実行
+pca_new = PCA(n_components=10)
+pca_new_results = pca_new.fit_transform(df_scaled)
+
+# 新しい寄与率の表示
+for i, ratio in enumerate(pca_new.explained_variance_ratio_[:5]):
+    print(f"真のPC{i+1}: {ratio:.2%}")
+```
+
+今回の26個の変数（13部位×XY座標）はお互いにバラバラに動いているわけではなく、「肘が上がれば手首も上がる」というように強い相関がある。PCAにより、連動して動くセットを抽出し、何を軸としているかを主成分として定義しなおす。
+`fit_transform`によりデータの散らばり具合をそのルールに従って26次元から10次元に座標を置き換える。
+
+explained_variance_ratio_は説明済みの分散の割合。元の26次元が持っていた情報の何パーセントをその主成分がカバーしているかというスコア。
+
+> 今回得られた結果
+>真のPC1: 21.84% 真のPC2: 14.91% 真のPC3: 11.69%
+   真のPC4: 9.42% 真のPC5: 7.46%
+
+```
+# 真のPC1（第1主成分）の重みを取り出す
+true_pc1_loadings = pca_new.components_[0] 
+
+# _yが含まれていれば青緑（teal）、そうでなければオレンジ（coral）
+bar_colors = ['teal' if '_y' in col else 'coral' for col in cols]
+
+# グラフの作成
+plt.figure(figsize=(12, 6))
+plt.bar(cols, true_pc1_loadings, color=bar_colors)
+plt.xticks(rotation=90)
+plt.title('True PC1 Loading Factors: Pure Pose Variation (Normalized)')
+plt.ylabel('Weight')
+plt.axhline(0, color='black', linewidth=0.8, linestyle='--')
+plt.show()
+```
+![[Pasted image 20260416183035.png]]
+意味が分からないデータ
+お尻が固定されていてHappy

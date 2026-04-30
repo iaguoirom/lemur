@@ -1,0 +1,31 @@
+# --- Python 関連のゴミ ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+build/
+dist/
+
+# --- Jupyter Notebook の一時ファイル ---
+.ipynb_checkpoints/
+
+# --- Windows / OneDrive 関連の残骸 ---
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# --- 巨大なデータ（ここが重要） ---
+# 解析済みの大きな動画やデータはGitに上げない（重くなるため）
+*.mp4
+*.avi
+*.csv
+*.h5
+*.pickle
+*.npy
+
+# --- DeepLabCut 関連の一時フォルダ ---
+dlc-models/
+training-datasets/
+iteration-*/
